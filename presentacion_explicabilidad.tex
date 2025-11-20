@@ -1,0 +1,216 @@
+\documentclass[10pt]{beamer}
+\usetheme{Montpellier}
+\usecolortheme{default}
+\setbeamertemplate{navigation symbols}{}
+
+\usepackage[utf8]{inputenc}
+\usepackage[spanish]{babel}
+\usepackage{graphicx}
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{grffile}
+
+
+\title[Explicabilidad UNet-ResNet50]{Explicabilidad de Segmentación de Alimentos (UNet-ResNet50)}
+\author{
+  David F. Orjuela\\ 
+  Jorge E. Rodríguez
+}
+\institute{Universidad de Ibagué}
+\date{\today}
+
+\definecolor{ProtColor}{HTML}{D62828}
+\definecolor{CarbColor}{HTML}{8E44AD}
+\definecolor{FatColor}{HTML}{FFC300}
+\definecolor{VegColor}{HTML}{2ECC71}
+\definecolor{OtherColor}{HTML}{F472B6}
+
+\begin{document}
+
+\begin{frame}[plain]\titlepage\end{frame}
+
+\begin{frame}{Agenda}
+  \tableofcontents
+\end{frame}
+
+\section{Objetivos}
+\begin{frame}{Objetivos del Proyecto}
+  \begin{itemize}
+    \item Segmentar alimentos en macro-clases (proteinas, carbohidratos, grasas, vegetales, otros).
+    \item Aplicar tecnicas de explicabilidad para entender la contribucion espacial del modelo.
+    \item Evaluar fidelidad (Insertion/Deletion) y robustez (randomizacion) de explicaciones.
+    \item Detectar patrones globales de atencion y posibles sesgos.
+  \end{itemize}
+\end{frame}
+
+\section{Datos}
+\begin{frame}{Fuente de Datos y Mapeo}
+  \begin{itemize}
+    \item Archivo \texttt{ingredients.csv}: IDs de ingredientes → macro-clase.
+    \item Carpetas: \texttt{images/} (RGB) y \texttt{masks/} (mascara por ingrediente).
+    \item Conversion fina → macro-clases mediante diccionario \texttt{id2macro}.
+    \item Macro-clases: background, proteins, carbohydrates, fats, vegetables, other.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Preprocesamiento}
+  \begin{itemize}
+    \item Redimensionar a 256x256 para uniformidad espacial.
+    \item Normalizacion: media=0.5, std=0.5 (cada canal) para estabilizar gradientes.
+    \item Libreria: \texttt{albumentations} + \texttt{ToTensorV2}.
+    \item Division implicita: 80\% entrenamiento / 20\% validacion.
+    \item Uso opcional de imagen externa (\texttt{pasta.jpg}) para demostracion sin mascara real.
+  \end{itemize}
+\end{frame}
+
+\section{Modelo}
+\begin{frame}{Arquitectura UNet-ResNet50}
+  \begin{itemize}
+    \item Encoder: ResNet-50 preentrenado (ImageNet) truncado antes de la FC.
+    \item Decoder: bloques \texttt{ConvTranspose2d} + \texttt{Upsample}.
+    \item Salida: 6 canales (macro-clases) misma resolucion que la entrada.
+    \item Modo \texttt{eval()} para inferencia y explicabilidad.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Pesos y Estado}
+  \begin{itemize}
+    \item Carga condicional de \texttt{unet\_resnet50.pth}.
+    \item \texttt{map\_location} maneja compatibilidad CPU/GPU.
+    \item Indicar siempre si las explicaciones provienen de pesos entrenados o no.
+  \end{itemize}
+\end{frame}
+
+\section{Entrenamiento}
+\begin{frame}{Configuracion de Entrenamiento}
+  \begin{itemize}
+    \item Datos: FoodSeg103 → mapeo fino a macro mediante \texttt{id2macro}.
+    \item Transformaciones: \texttt{Resize(256)}, \texttt{Normalize}, \texttt{ToTensorV2}.
+    \item Division: 80\% train / 20\% val; \texttt{batch\_size=8}; semilla=42.
+    \item Optimizacion: \texttt{Adam(lr=1e-3)}; perdida: \texttt{CrossEntropyLoss}.
+    \item Epocas: 71; dispositivo: CPU/GPU.
+    \item Metricas: accuracy y F1; IoU por clase.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Curvas de Entrenamiento}
+  \begin{columns}
+    \column{0.5\textwidth}
+      \includegraphics[width=\textwidth]{Accuracy and loss/training_loss.png}
+      \small Perdida por epoca
+    \column{0.5\textwidth}
+      \includegraphics[width=\textwidth]{Accuracy and loss/training_accuracy.png}
+      \small Accuracy por epoca
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Validacion}
+  \begin{columns}[t]
+    \column[t]{0.5\textwidth}
+      \includegraphics[width=\textwidth]{ResultadosPRuebaIPYNB/segmentacion_resultados.png}
+    \column[t]{0.5\textwidth}
+      \includegraphics[width=\textwidth, height=0.8\textheight, keepaspectratio]{ResultadosPRuebaIPYNB/segmentacion_baja_accuracy.png}
+
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Resumen de Accuracy}
+  \begin{center}
+    \includegraphics[width=0.8\textwidth]{ResultadosPRuebaIPYNB/resumen_accuracy.png}
+  \end{center}
+\end{frame}
+
+\section{Explicabilidad}
+\begin{frame}{Metodologia de Explicabilidad}
+  \begin{itemize}
+    \item Grad-CAM por clase.
+    \item Grad-CAM multilayer.
+    \item Insertion/Deletion para medir fidelidad.
+    \item Randomizacion de pesos para medir robustez.
+    \item Promedios Grad-CAM para patrones globales.
+  \end{itemize}
+\end{frame}
+
+\section{Resultados Grad-CAM}
+
+\begin{frame}{Grad-CAM por Clase}
+\centering
+\begin{tabular}{cc}
+  \includegraphics[height=0.35\textheight]{explicabilidad_resultados/gradcam_carbohydrates.png} &
+  \includegraphics[height=0.35\textheight]{explicabilidad_resultados/gradcam_proteins.png} \\[0.3cm]
+  \includegraphics[height=0.35\textheight]{explicabilidad_resultados/gradcam_fats.png} &
+  \includegraphics[height=0.35\textheight]{explicabilidad_resultados/gradcam_vegetables.png}
+\end{tabular}
+\end{frame}
+
+\begin{frame}{Grad-CAM Multicapa}
+  \begin{center}
+    \includegraphics[width=0.75\textwidth]{explicabilidad_resultados/gradcam_multilayer_carbohydrates_sin_gradcampp.png}
+  \end{center}
+\end{frame}
+
+\section{Fidelidad y Robustez}
+
+\begin{frame}{Curvas Insertion / Deletion}
+  \begin{columns}
+    \column{0.55\textwidth}
+      \includegraphics[width=\textwidth]{explicabilidad_resultados/gradcam_insertion_deletion_carbohydrates_sin_gradcampp.png}
+    \column{0.45\textwidth}
+      \small Insertion: subida rapida.\\
+      Deletion: caida marcada.\\
+      AUC indica calidad explicativa.
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Sanity Check (Randomizacion)}
+  \begin{columns}
+    \column{0.55\textwidth}
+      \includegraphics[width=\textwidth]{explicabilidad_resultados/gradcam_sanity_randomization_layer4.png}
+    \column{0.45\textwidth}
+      \small Reinicializar capas profundas destruye el CAM.\\
+      Confirma dependencia de pesos aprendidos.
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Promedio Grad-CAM por Clase}
+  \begin{center}
+    \includegraphics[width=0.82\textwidth]{explicabilidad_resultados/gradcam_average_per_class.png}
+  \end{center}
+\end{frame}
+
+\section{Conclusiones}
+\begin{frame}{Conclusiones}
+  \begin{itemize}
+    \item Grad-CAM localiza regiones relevantes.
+    \item Insertion/Deletion mide fidelidad cuantitativa.
+    \item Randomizacion valida robustez explicativa.
+    \item Promedios revelan patrones globales.
+    \item Atribuciones por gradiente complementan detalles finos.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Limitaciones y Futuro}
+  \begin{itemize}
+    \item Incluir metricas como IoU/Dice por clase.
+    \item Riesgo interpretativo si el modelo no esta completamente entrenado.
+    \item Extender tecnicas: Integrated Gradients, Occlusion, DeepLift.
+    \item Auditorias de sesgos de posicion.
+    \item Pipeline reproducible completo.
+  \end{itemize}
+\end{frame}
+
+\section{Referencias}
+\begin{frame}{Referencias}
+  \footnotesize
+  \begin{itemize}
+    \item Selvaraju et al. (2017) Grad-CAM.
+    \item Adebayo et al. (2018) Sanity checks for saliency maps.
+    \item Smilkov et al. (2017) SmoothGrad.
+    \item Springenberg et al. (2015) Guided Backpropagation.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[plain]\centering\Huge Gracias\end{frame}
+
+\end{document}
